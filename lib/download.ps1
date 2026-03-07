@@ -62,7 +62,7 @@ function Invoke-CachedDownload ($app, $version, $url, $to, $cookies = $null, $us
 
     if (!($null -eq $to)) {
         if ($use_cache) {
-            Copy-Item $cached $to
+            New-HardLinkWithCopyFallback $cached $to
         } else {
             Move-Item $cached $to -Force
         }
@@ -523,7 +523,7 @@ function Invoke-CachedAria2Download ($app, $version, $manifest, $architecture, $
 
         if (!($dir -eq $cachedir)) {
             if ($use_cache) {
-                Copy-Item $data.$url.source $data.$url.target
+                New-HardLinkWithCopyFallback $data.$url.source $data.$url.target
             } else {
                 Move-Item $data.$url.source $data.$url.target -Force
             }
@@ -770,6 +770,16 @@ function get_hash([String] $multihash) {
     }
 
     return $type, $hash.ToLower()
+}
+
+### Reduce IO by creating hard links when possible
+
+function New-HardLinkWithCopyFallback($source, $target) {
+    try {
+        New-Item -Path $target -ItemType HardLink -Value $source -ErrorAction Stop | Out-Null
+    } catch {
+        Copy-Item $source $target
+    }
 }
 
 # Setup proxy globally

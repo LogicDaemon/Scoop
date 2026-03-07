@@ -1,6 +1,8 @@
 # Usage: scoop update <app> [options]
 # Summary: Update apps, or Scoop itself
 # Help: 'scoop update' updates Scoop to the latest version.
+# For Scoop Core, local commits are rebased on top of the configured remote branch,
+# with optional autostash and stash restore around the rebase.
 # 'scoop update <app>' installs a new version of that app, if there is one.
 #
 # You can use '*' in place of <app> to update all apps.
@@ -105,15 +107,30 @@ function Sync-Scoop {
         $previousCommit = Invoke-Git -Path $currentdir -ArgumentList @('rev-parse', 'HEAD')
         $currentRepo = Invoke-Git -Path $currentdir -ArgumentList @('config', 'remote.origin.url')
         $currentBranch = Invoke-Git -Path $currentdir -ArgumentList @('branch')
+        $stashCreated = $false
+
+        function Restore-ScoopUpdateStash {
+            if ($stashCreated) {
+                warn 'Restoring stashed Scoop changes...'
+                Invoke-Git -Path $currentdir -ArgumentList @('stash', 'pop', '-q')
+                if ($lastexitcode -ne 0) {
+                    warn 'Scoop was updated, but the stashed changes could not be restored cleanly. Resolve them with git stash manually.'
+                }
+            }
+        }
 
         $isRepoChanged = !($currentRepo -match $configRepo)
         $isBranchChanged = !($currentBranch -match "\*\s+$configBranch")
 
         # Stash uncommitted changes
-        if (Invoke-Git -Path $currentdir -ArgumentList @('diff', 'HEAD', '--name-only')) {
+        if (Invoke-Git -Path $currentdir -ArgumentList @('status', '--porcelain', '--untracked-files=all')) {
             if (get_config AUTOSTASH_ON_CONFLICT) {
                 warn 'Uncommitted changes detected. Stashing...'
                 Invoke-Git -Path $currentdir -ArgumentList @('stash', 'push', '-m', "WIP at $([System.DateTime]::Now.ToString('o'))", '-u', '-q')
+                if ($lastexitcode -ne 0) {
+                    abort 'Failed to stash local Scoop changes before update.'
+                }
+                $stashCreated = $true
             } else {
                 warn 'Uncommitted changes detected. Update aborted.'
                 return
@@ -130,11 +147,28 @@ function Sync-Scoop {
             # Reset git fetch refs, so that it can fetch all branches (GH-3368)
             Invoke-Git -Path $currentdir -ArgumentList @('config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*')
             # fetch remote branch
-            Invoke-Git -Path $currentdir -ArgumentList @('fetch', '--force', 'origin', "refs/heads/$configBranch`:refs/remotes/origin/$configBranch", '-q')
+            # Invoke-Git -Path $currentdir -ArgumentList @('fetch', '--force', 'origin', "refs/heads/$configBranch`:refs/remotes/origin/$configBranch", '-q')
+            Invoke-Git -Path $currentdir -ArgumentList @('fetch', 'origin')
+            if ($lastexitcode -ne 0) {
+                Restore-ScoopUpdateStash
+                abort "Failed to fetch Scoop branch '$configBranch' from origin."
+            }
             # checkout and track the branch
-            Invoke-Git -Path $currentdir -ArgumentList @('checkout', '-B', $configBranch, '-t', "origin/$configBranch", '-q')
+            # Invoke-Git -Path $currentdir -ArgumentList @('checkout', '-B', $configBranch, '-t', "origin/$configBranch", '-q')
+            Invoke-Git -Path $currentdir -ArgumentList @('rebase', "refs/remotes/origin/$configBranch")
+            if ($lastexitcode -ne 0) {
+                warn 'Rebase failed while updating Scoop. Aborting rebase and restoring the previous working tree...'
+                Invoke-Git -Path $currentdir -ArgumentList @('rebase', '--abort')
+                Restore-ScoopUpdateStash
+                abort 'Update failed because local Scoop commits could not be rebased cleanly.'
+            }
+            Restore-ScoopUpdateStash
             # reset branch HEAD
-            Invoke-Git -Path $currentdir -ArgumentList @('reset', '--hard', "origin/$configBranch", '-q')
+            # Invoke-Git -Path $currentdir -ArgumentList @('reset', '--hard', "origin/$configBranch", '-q')
+            # if ($lastexitcode -ne 0) {
+            #     Restore-ScoopUpdateStash
+            #     abort "Failed to reset Scoop Core to '$configBranch'."
+            # }
         } else {
             Invoke-Git -Path $currentdir -ArgumentList @('pull', '--tags', '--force', '-q')
         }
