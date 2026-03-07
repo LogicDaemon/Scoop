@@ -51,7 +51,8 @@
 #       * To bypass the system proxy and connect directly, use 'none' (with no username or password)
 #
 # autostash_on_conflict: $true|$false
-#       When a conflict is detected during updating, Scoop will auto-stash the uncommitted changes.
+#       When Scoop Core update needs to rebase local commits and the working tree is dirty,
+#       Scoop will auto-stash the uncommitted changes before rebasing and then restore them.
 #       (Default is $false, which will abort the update)
 #
 # default_architecture: 64bit|32bit|arm64

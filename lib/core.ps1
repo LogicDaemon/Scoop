@@ -63,6 +63,14 @@ function Optimize-SecurityProtocol {
     }
 }
 
+function New-HardLinkWithCopyFallback($source, $target) {
+    try {
+        New-Item -Path $target -ItemType HardLink -Value $source -ErrorAction Stop | Out-Null
+    } catch {
+        Copy-Item $source $target -Force
+    }
+}
+
 function Show-DeprecatedWarning {
     <#
     .SYNOPSIS
@@ -901,13 +909,17 @@ function shim($path, $global, $name, $arg) {
     if ($path -match '\.(exe|com)$') {
         # for programs with no awareness of any shell
         warn_on_overwrite "$shim.shim" $path
-        Copy-Item (get_shim_path) "$shim.exe" -Force
+        $target_subsystem = Get-PESubsystem $resolved_path
+        if ($target_subsystem -eq 2) {
+            Copy-Item (get_shim_path) "$shim.exe" -Force
+        } else {
+            New-HardLinkWithCopyFallback (get_shim_path) "$shim.exe"
+        }
         Write-Output "path = `"$resolved_path`"" | Out-UTF8File "$shim.shim"
         if ($arg) {
             Write-Output "args = $arg" | Out-UTF8File "$shim.shim" -Append
         }
 
-        $target_subsystem = Get-PESubsystem $resolved_path
         if ($target_subsystem -eq 2) { # we only want to make shims GUI
             Write-Output "Making $shim.exe a GUI binary."
             Set-PESubsystem "$shim.exe" $target_subsystem | Out-Null
