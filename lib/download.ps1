@@ -193,6 +193,11 @@ function Invoke-Download ($url, $to, $cookies, $progress) {
         }
         $wres.close()
     }
+
+    # Set file timestamp from Last-Modified header if available
+    if ($wres.Headers['Last-Modified']) {
+        Set-FileLastModified $to $wres.Headers['Last-Modified']
+    }
 }
 
 function Format-DownloadProgress ($url, $read, $total, $console) {
@@ -358,6 +363,7 @@ function Invoke-CachedAria2Download ($app, $version, $manifest, $architecture, $
         '--continue'
         '--summary-interval=0'
         '--auto-save-interval=1'
+        '--remote-time=true'
     )
 
     if ($cookies) {
@@ -523,6 +529,21 @@ function Invoke-CachedAria2Download ($app, $version, $manifest, $architecture, $
 }
 
 ## Helper functions
+
+### File timestamp
+
+function Set-FileLastModified ($file, $lastModified) {
+    if (!$lastModified -or !(Test-Path $file)) { return }
+    try {
+        $date = [DateTime]::ParseExact($lastModified, 'ddd, dd MMM yyyy HH:mm:ss GMT', [Globalization.CultureInfo]::InvariantCulture)
+        if ($date -ne [DateTime]::MinValue) {
+            (Get-Item $file).LastWriteTime = $date.ToLocalTime()
+            (Get-Item $file).LastAccessTime = $date.ToLocalTime()
+        }
+    } catch {
+        # Ignore parsing errors - server may send invalid date format
+    }
+}
 
 ### Downloader parameters
 
